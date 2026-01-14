@@ -23,6 +23,7 @@
 #define TIRED     1
 #define ANGRY     2
 #define HAPPY     3
+#define SMIRK     4  // Cool smirk with teeth (perfect for tachometer mode)
 
 #define ON  1
 #define OFF 0
@@ -48,6 +49,7 @@ class TFT_RoboEyes {
     // Display configuration – you can update these via setScreenSize()
     int screenWidth = 320;   // effective width (set by user)
     int screenHeight = 172;  // effective height (set by user)
+    int rotation = 0;        // screen rotation (0-3)
     uint16_t bgColor;        // background color for drawing overlays
     uint16_t mainColor;      // color for the eyes
 
@@ -59,6 +61,7 @@ class TFT_RoboEyes {
     bool tired;
     bool angry;
     bool happy;
+    bool smirk;     // cool grin with teeth
     bool curious;
     bool cyclops;   // if true, draw a single (center) eye
     bool eyeL_open;
@@ -153,11 +156,37 @@ class TFT_RoboEyes {
     int mouthWidth;              // width of mouth
     int mouthHeight;             // height of mouth
     int mouthCurvature;          // curvature for happy/sad mouth
+    
+    // Mouth animation variables
+    int mouthWidthCurrent;       // current animated width
+    int mouthOffsetX;            // horizontal offset for confused animation
+    int mouthOffsetY;            // vertical offset for laugh animation
+    
+    // Separate mouth mood (independent from eye mood)
+    bool mouthTired;             // mouth in tired mode
+    bool mouthAngry;             // mouth in angry mode
+    bool mouthHappy;             // mouth in happy mode
+    bool mouthSmirk;             // mouth in smirk mode
 
     // --- New Blink State for AutoBlinker ---
     bool blinkingActive;             // indicates if a blink is in progress (closed state)
     unsigned long blinkCloseDurationTimer; // timer for how long to stay closed
     int blinkCloseDuration = 150;    // blink closed duration in milliseconds
+
+    // --- Tachometer Mode ---
+    bool tachometerMode;             // enable/disable tachometer mode
+    float tachometerSpeed;           // current speed value (0-100)
+    float tachometerTargetSpeed;     // target speed for smooth animation
+    uint16_t tachometerNeedleColor;  // color of the needle
+    uint16_t tachometerScaleColor;   // color of the scale markings
+    
+    // Store previous animation settings to restore after tachometer mode
+    bool previousAutoblinker;
+    int previousBlinkInterval;
+    int previousBlinkIntervalVariation;
+    bool previousIdle;
+    int previousIdleInterval;
+    int previousIdleIntervalVariation;
 
     // ---------------------------
     // Constructor
@@ -170,7 +199,10 @@ class TFT_RoboEyes {
       if (!portrait) {
         screenWidth = 320;
         screenHeight = 172;
+        rotation = rotations;
         tft->setRotation(rotations);
+      } else {
+        rotation = rotations;
       }
 
       // Set default colors
@@ -182,7 +214,7 @@ class TFT_RoboEyes {
       fpsTimer = 0;
 
       // Initialize mood flags
-      tired = angry = happy = curious = cyclops = false;
+      tired = angry = happy = smirk = curious = cyclops = false;
       eyeL_open = eyeR_open = false;
 
       // Initialize eye dimensions (default values, you can adjust later)
@@ -241,7 +273,7 @@ class TFT_RoboEyes {
       autoblinker = false; blinkInterval = 1; blinkIntervalVariation = 4; blinktimer = 0;
       idle = false; idleInterval = 1; idleIntervalVariation = 3; idleAnimationTimer = 0;
       confused = false; confusedAnimationDuration = 500; confusedToggle = true;
-      laugh = false; laughAnimationDuration = 500; laughToggle = true;
+      laugh = false; laughAnimationDuration = 1000; laughToggle = true;
 
       // Sweat animation defaults
       sweat = false;
@@ -257,10 +289,34 @@ class TFT_RoboEyes {
       mouthCurvature = 0;
       mouthY = 0;
       mouthX = 0;
+      mouthWidthCurrent = 40;
+      mouthOffsetX = 0;
+      mouthOffsetY = 0;
+      
+      // Initialize mouth mood to match eye mood (default)
+      mouthTired = false;
+      mouthAngry = false;
+      mouthHappy = false;
+      mouthSmirk = false;
 
       // New auto-blink state
       blinkingActive = false;
       blinkCloseDurationTimer = 0;
+
+      // Tachometer defaults
+      tachometerMode = false;
+      tachometerSpeed = 0;
+      tachometerTargetSpeed = 0;
+      tachometerNeedleColor = TFT_YELLOW;
+      tachometerScaleColor = TFT_RED;
+      
+      // Initialize previous settings storage
+      previousAutoblinker = false;
+      previousBlinkInterval = 1;
+      previousBlinkIntervalVariation = 4;
+      previousIdle = false;
+      previousIdleInterval = 1;
+      previousIdleIntervalVariation = 3;
     }
 
     // ---------------------------
@@ -341,13 +397,27 @@ class TFT_RoboEyes {
       spaceBetweenDefault = space;
     }
 
-    // Set mood expression
+    // Set mood expression (for eyes)
     void setMood(uint8_t mood) {
       switch (mood) {
-        case TIRED:  tired = true; angry = false; happy = false; break;
-        case ANGRY:  tired = false; angry = true; happy = false; break;
-        case HAPPY:  tired = false; angry = false; happy = true; break;
-        default:     tired = false; angry = false; happy = false; break;
+        case TIRED:  tired = true; angry = false; happy = false; smirk = false; break;
+        case ANGRY:  tired = false; angry = true; happy = false; smirk = false; break;
+        case HAPPY:  tired = false; angry = false; happy = true; smirk = false; break;
+        case SMIRK:  tired = false; angry = false; happy = false; smirk = true; break;
+        default:     tired = false; angry = false; happy = false; smirk = false; break;
+      }
+      // Also update mouth mood to match (for backwards compatibility)
+      setMouthMood(mood);
+    }
+    
+    // Set mouth mood independently from eye mood
+    void setMouthMood(uint8_t mood) {
+      switch (mood) {
+        case TIRED:  mouthTired = true; mouthAngry = false; mouthHappy = false; mouthSmirk = false; break;
+        case ANGRY:  mouthTired = false; mouthAngry = true; mouthHappy = false; mouthSmirk = false; break;
+        case HAPPY:  mouthTired = false; mouthAngry = false; mouthHappy = true; mouthSmirk = false; break;
+        case SMIRK:  mouthTired = false; mouthAngry = false; mouthHappy = false; mouthSmirk = true; break;
+        default:     mouthTired = false; mouthAngry = false; mouthHappy = false; mouthSmirk = false; break;
       }
     }
 
@@ -426,17 +496,11 @@ class TFT_RoboEyes {
       hFlicker = flickerBit;
       hFlickerAmplitude = amplitude;
     }
-    void setHFlicker(bool flickerBit) {
-      hFlicker = flickerBit;
-    }
 
     // Vertical flickering
     void setVFlicker(bool flickerBit, uint8_t amplitude = 10) {
       vFlicker = flickerBit;
       vFlickerAmplitude = amplitude;
-    }
-    void setVFlicker(bool flickerBit) {
-      vFlicker = flickerBit;
     }
 
     // Enable or disable sweat animation
@@ -455,12 +519,76 @@ class TFT_RoboEyes {
       bgColor = background;
     }
 
+    // --- Tachometer Mode ---
+    // Enable or disable tachometer mode
+    void setTachometerMode(bool enabled) {
+      // Only make changes if the mode actually changes
+      if (enabled == tachometerMode) return;
+      
+      tachometerMode = enabled;
+      if (enabled) {
+        // Save current animation settings before disabling
+        previousAutoblinker = autoblinker;
+        previousBlinkInterval = blinkInterval;
+        previousBlinkIntervalVariation = blinkIntervalVariation;
+        previousIdle = idle;
+        previousIdleInterval = idleInterval;
+        previousIdleIntervalVariation = idleIntervalVariation;
+        
+        // Set eyes to half-height for semicircle shape
+        eyeLheightNext = eyeLheightDefault / 2;
+        eyeRheightNext = eyeRheightDefault / 2;
+        // Make bottom corners rounded
+        eyeLborderRadiusNext = eyeLwidthDefault / 2;
+        eyeRborderRadiusNext = eyeRwidthDefault / 2;
+        // Keep eyes open
+        eyeL_open = true;
+        eyeR_open = true;
+        // Eyes should be black (background color)
+        // Only needle and scale will be colored
+        // Disable conflicting animations
+        setAutoblinker(false);
+        setIdleMode(false);
+      } else {
+        // Restore normal eye height
+        eyeLheightNext = eyeLheightDefault;
+        eyeRheightNext = eyeRheightDefault;
+        eyeLborderRadiusNext = eyeLborderRadiusDefault;
+        eyeRborderRadiusNext = eyeRborderRadiusDefault;
+        // Restore previous animation settings
+        setAutoblinker(previousAutoblinker, previousBlinkInterval, previousBlinkIntervalVariation);
+        setIdleMode(previousIdle, previousIdleInterval, previousIdleIntervalVariation);
+      }
+    }
+
+    // Set tachometer speed (0-100)
+    void setTachometerSpeed(float speed) {
+      if (speed < 0) speed = 0;
+      if (speed > 100) speed = 100;
+      tachometerTargetSpeed = speed;
+    }
+
+    // Set tachometer colors
+    void setTachometerColors(uint16_t needleColor, uint16_t scaleColor) {
+      tachometerNeedleColor = needleColor;
+      tachometerScaleColor = scaleColor;
+    }
+
     // ---------------------------
     // Getters for screen constraints
     int getScreenConstraint_X() {
       return screenWidth - eyeLwidthCurrent - spaceBetweenCurrent - eyeRwidthCurrent;
     }
     int getScreenConstraint_Y() {
+      // When mouth is enabled, reserve space for it below the eyes
+      if (mouth) {
+        // Calculate total space needed: eyes + mouth offset + mouth height + some buffer
+        int effectiveEyeHeight = tachometerMode ? (eyeLheightDefault / 2) : eyeLheightDefault;
+        int mouthOffset = tachometerMode ? 3 : 15;
+        int mouthSpace = 30; // Approximate mouth height including opening
+        int totalHeight = effectiveEyeHeight + mouthOffset + mouthSpace;
+        return screenHeight - totalHeight;
+      }
       return screenHeight - eyeLheightDefault;
     }
 
@@ -524,10 +652,11 @@ class TFT_RoboEyes {
     void drawEyes() {
       // --- PRE-CALCULATIONS ---
       if (curious) {
-        if (eyeLxNext <= 10) { eyeLheightOffset = 8; }
-        else if (eyeLxNext >= (getScreenConstraint_X() - 10) && cyclops) { eyeLheightOffset = 8; }
+        // Left eye gets bigger only at left edge
+        if (eyeLxNext <= 10) { eyeLheightOffset = 10; }
         else { eyeLheightOffset = 0; }
-        if (eyeRxNext >= screenWidth - eyeRwidthCurrent - 10) { eyeRheightOffset = 8; }
+        // Right eye gets bigger only at right edge
+        if (eyeRxNext >= screenWidth - eyeRwidthCurrent - 10) { eyeRheightOffset = 10; }
         else { eyeRheightOffset = 0; }
       } else {
         eyeLheightOffset = 0;
@@ -584,7 +713,7 @@ class TFT_RoboEyes {
 
       if (laugh) {
         if (laughToggle) {
-          setVFlicker(true, 5);
+          setVFlicker(true, 3);
           laughAnimationTimer = millis();
           laughToggle = false;
         } else if (millis() >= laughAnimationTimer + laughAnimationDuration) {
@@ -608,8 +737,9 @@ class TFT_RoboEyes {
 
       if (idle) {
         if (millis() >= idleAnimationTimer) {
-          eyeLxNext = random(getScreenConstraint_X());
-          eyeLyNext = random(getScreenConstraint_Y());
+          // Allow eyes to reach edges for curious effect (0 to max inclusive)
+          eyeLxNext = random(getScreenConstraint_X() + 1);
+          eyeLyNext = random(getScreenConstraint_Y() + 1);
           idleAnimationTimer = millis() + (idleInterval * 1000UL) + (random(idleIntervalVariation) * 1000UL);
         }
       }
@@ -735,6 +865,11 @@ class TFT_RoboEyes {
         sprite->fillRoundRect(sweat3XPos, sweat3YPos, sweat3Width, sweat3Height, sweatBorderradius, mainColor);
       }
 
+      // Draw tachometer if enabled
+      if (tachometerMode) {
+        drawTachometer();
+      }
+
       // Draw mouth if enabled
       if (mouth) {
         drawMouth();
@@ -744,57 +879,239 @@ class TFT_RoboEyes {
     // ---------------------------
     // Draw mouth based on current mood
     void drawMouth() {
+      // Mouth animation reactions to eye animations
+      int targetMouthOffsetX = 0;
+      int targetMouthOffsetY = 0;
+      
+      // Determine temporary mood based on active animations
+      bool tempSmirk = mouthSmirk;
+      bool tempTired = mouthTired;
+      bool tempHappy = mouthHappy;
+      bool tempAngry = mouthAngry;
+      
+      // Laugh animation - change to SMIRK and wobble vertically
+      if (laugh && !laughToggle) {
+        tempSmirk = true;
+        tempTired = false;
+        tempHappy = false;
+        tempAngry = false;
+        // Wobble up and down like the eyes (using vFlickerAlternate if available)
+        targetMouthOffsetY = (millis() / 100) % 2 == 0 ? 3 : -3;  // Simple wobble
+      }
+      
+      // Confused animation - change to TIRED and shift left/right
+      if (confused && !confusedToggle) {
+        tempTired = true;
+        tempSmirk = false;
+        tempHappy = false;
+        tempAngry = false;
+        // Follow horizontal eye flicker
+        targetMouthOffsetX = hFlickerAlternate ? 15 : -15;
+      }
+      
+      // Smooth transitions for mouth animations
+      mouthOffsetX = (mouthOffsetX * 3 + targetMouthOffsetX) / 4;
+      mouthOffsetY = (mouthOffsetY * 3 + targetMouthOffsetY) / 4;
+      
       // Calculate mouth position: centered below the eyes
-      // Use Next positions to follow eye movement without jumping on blink
+      // Use current positions and heights for accurate placement
+      // Much smaller offset in tachometer mode for closer positioning
+      int mouthOffset = tachometerMode ? 3 : 15;
+      bool isInverted = (rotation == 1 || rotation == 2);  // Upside down
+      
+      // In tachometer mode, eyes are half height, so use half height for positioning
+      int effectiveEyeHeight = tachometerMode ? (eyeLheightDefault / 2) : eyeLheightDefault;
+      
+      // Calculate curious offset - subtract because eyes move UP when curious
+      int curiousOffset = 0;
+      if (curious && !tachometerMode) {
+        if (cyclops) {
+          curiousOffset = eyeLheightOffset / 2;
+        } else {
+          curiousOffset = max(eyeLheightOffset, eyeRheightOffset) / 2;
+        }
+      }
+      
       if (cyclops) {
         // For cyclops mode, center under the single eye
-        mouthX = eyeLxNext + (eyeLwidthDefault / 2) - (mouthWidth / 2);
-        mouthY = eyeLyNext + eyeLheightDefault + 15;
+        mouthX = eyeLx + (eyeLwidthCurrent / 2) - (mouthWidthCurrent / 2) + mouthOffsetX;
+        // Use the target Y position (eyeLyNext) which doesn't change during blink
+        int baseY = eyeLyNext + effectiveEyeHeight;
+        mouthY = baseY + mouthOffset - curiousOffset + mouthOffsetY;
+        
+        // Add flicker offsets if active
+        if (hFlicker) {
+          mouthX += hFlickerAlternate ? hFlickerAmplitude : -hFlickerAmplitude;
+        }
+        if (vFlicker) {
+          mouthY += vFlickerAlternate ? vFlickerAmplitude : -vFlickerAmplitude;
+        }
       } else {
         // For two eyes, center between them
-        int centerX = eyeLxNext + eyeLwidthDefault + (spaceBetweenDefault / 2);
-        mouthX = centerX - (mouthWidth / 2);
-        // Position below the eyes (use Next Y position + default height)
-        int lowerEyeBottom = eyeLyNext + eyeLheightDefault;
-        int rightEyeBottom = eyeRyNext + eyeLheightDefault;
-        mouthY = max(lowerEyeBottom, rightEyeBottom) + 15;
+        int centerX = eyeLx + eyeLwidthCurrent + (spaceBetweenCurrent / 2);
+        mouthX = centerX - (mouthWidthCurrent / 2) + mouthOffsetX;
+        // Use the target Y position (eyeLyNext/eyeRyNext) which doesn't change during blink
+        int baseY = eyeLyNext + effectiveEyeHeight;
+        mouthY = baseY + mouthOffset - curiousOffset + mouthOffsetY;
+        
+        // Add flicker offsets if active
+        if (hFlicker) {
+          mouthX += hFlickerAlternate ? hFlickerAmplitude : -hFlickerAmplitude;
+        }
+        if (vFlicker) {
+          mouthY += vFlickerAlternate ? vFlickerAmplitude : -vFlickerAmplitude;
+        }
       }
 
-      // Draw different mouth shapes based on mood
-      if (happy) {
-        // Happy: smiling arc (curve upward = positive yOffset)
+      // Determine mouth color - use tachometer needle color in tachometer mode
+      uint16_t mouthColor = tachometerMode ? tachometerNeedleColor : mainColor;
+
+      // Draw different mouth shapes based on MOUTH mood (use temp variables during animations)
+      if (tempSmirk) {
+        // Smirk: :D shape (rotated 90°) - straight line on top, expanding arc below
+        // Calculate grin intensity based on tachometer speed (0-100)
+        float speedFactor = tachometerMode ? (tachometerSpeed / 100.0) : 0.5;
+        
+        // Dynamic mouth width - starts at 80% and grows to 130%
+        int dynamicWidth = mouthWidthCurrent * (0.8 + 0.5 * speedFactor);
+        int widthOffset = (mouthWidthCurrent - dynamicWidth) / 2;
+        
+        // D-shape expansion height - grows with speed
+        int dHeight = (int)(25 * speedFactor);  // 0-25 pixels expansion
+        
+        // Draw straight horizontal line (top of D-shape) - thick line
+        for (int i = 0; i < dynamicWidth; i++) {
+          int x = mouthX + widthOffset + i;
+          sprite->fillCircle(x, mouthY, 2, mouthColor);
+          sprite->fillCircle(x, mouthY + 1, 2, mouthColor);
+          sprite->fillCircle(x, mouthY - 1, 2, mouthColor);
+        }
+        
+        // Draw expanding D-arc below the straight line
+        if (dHeight > 2) {
+          // Fill interior with dark red
+          for (int i = 0; i < dynamicWidth; i++) {
+            float progress = (float)i / dynamicWidth;
+            // Parabolic arc - belly of the D expanding downward
+            int arcDepth = (int)(dHeight * 4.0 * progress * (1 - progress));
+            int bottomY = mouthY + arcDepth;
+            
+            // Fill from straight line down to arc
+            for (int y = mouthY + 3; y < bottomY; y++) {
+              sprite->drawPixel(mouthX + widthOffset + i, y, 0x1800);  // Dark red interior
+            }
+          }
+          
+          // Draw the arc outline (bottom of D)
+          for (int i = 0; i < dynamicWidth; i++) {
+            float progress = (float)i / dynamicWidth;
+            int arcDepth = (int)(dHeight * 4.0 * progress * (1 - progress));
+            int bottomY = mouthY + arcDepth;
+            sprite->fillCircle(mouthX + widthOffset + i, bottomY, 2, mouthColor);
+          }
+        }
+      } else if (tempHappy) {
+        // Happy: smiling arc (curve downward = positive yOffset)
         // Draw a curved line using filled circle segments
-        for (int i = 0; i < mouthWidth; i++) {
-          float progress = (float)i / mouthWidth;
+        for (int i = 0; i < mouthWidthCurrent; i++) {
+          float progress = (float)i / mouthWidthCurrent;
           // Parabolic curve for smile
           int yOffset = (int)(12 * progress * (1 - progress));
-          sprite->fillCircle(mouthX + i, mouthY + yOffset, 1, mainColor);
+          sprite->fillCircle(mouthX + i, mouthY + yOffset, 1, mouthColor);
         }
         // Thicker line for better visibility
-        for (int i = 0; i < mouthWidth; i++) {
-          float progress = (float)i / mouthWidth;
+        for (int i = 0; i < mouthWidthCurrent; i++) {
+          float progress = (float)i / mouthWidthCurrent;
           int yOffset = (int)(12 * progress * (1 - progress));
-          sprite->fillCircle(mouthX + i, mouthY + yOffset + 1, 1, mainColor);
+          sprite->fillCircle(mouthX + i, mouthY + yOffset + 1, 1, mouthColor);
         }
-      } else if (angry) {
-        // Angry: frowning arc (curve downward = negative yOffset)
-        for (int i = 0; i < mouthWidth; i++) {
-          float progress = (float)i / mouthWidth;
+      } else if (tempAngry) {
+        // Angry: frowning arc (curve upward = negative yOffset)
+        for (int i = 0; i < mouthWidthCurrent; i++) {
+          float progress = (float)i / mouthWidthCurrent;
           int yOffset = (int)(12 * progress * (1 - progress));
-          sprite->fillCircle(mouthX + i, mouthY - yOffset, 1, mainColor);
+          sprite->fillCircle(mouthX + i, mouthY - yOffset, 1, mouthColor);
         }
-        for (int i = 0; i < mouthWidth; i++) {
-          float progress = (float)i / mouthWidth;
+        for (int i = 0; i < mouthWidthCurrent; i++) {
+          float progress = (float)i / mouthWidthCurrent;
           int yOffset = (int)(12 * progress * (1 - progress));
-          sprite->fillCircle(mouthX + i, mouthY - yOffset + 1, 1, mainColor);
+          sprite->fillCircle(mouthX + i, mouthY - yOffset + 1, 1, mouthColor);
         }
-      } else if (tired) {
+      } else if (tempTired) {
         // Tired: small open mouth (oval)
-        sprite->fillRoundRect(mouthX + 10, mouthY, mouthWidth - 20, mouthHeight + 4, 3, mainColor);
+        sprite->fillRoundRect(mouthX + 10, mouthY, mouthWidthCurrent - 20, mouthHeight + 4, 3, mouthColor);
       } else {
         // Default: straight line
-        sprite->fillRoundRect(mouthX, mouthY, mouthWidth, 3, 1, mainColor);
+        sprite->fillRoundRect(mouthX, mouthY, mouthWidthCurrent, 3, 1, mouthColor);
       }
+    }
+
+    // ---------------------------
+    // Draw tachometer overlay on the eyes
+    void drawTachometer() {
+      // Smooth speed transition
+      tachometerSpeed += (tachometerTargetSpeed - tachometerSpeed) * 0.15;
+      
+      // For semicircle tachometer, the center is at the top edge
+      // of the visible half-circle
+      int leftCenterX = eyeLx + eyeLwidthCurrent / 2;
+      int leftCenterY = eyeLy;  // Top of the eye
+      int radius = eyeLwidthCurrent / 2;
+      
+      // Draw left tachometer
+      drawTachometerDial(leftCenterX, leftCenterY, radius);
+      
+      // Draw right tachometer if not in cyclops mode
+      if (!cyclops) {
+        int rightCenterX = eyeRx + eyeRwidthCurrent / 2;
+        int rightCenterY = eyeRy;  // Top of the eye
+        drawTachometerDial(rightCenterX, rightCenterY, radius);
+      }
+    }
+
+    // Draw a single tachometer dial
+    void drawTachometerDial(int centerX, int centerY, int radius) {
+      // For semicircle tachometer, center is at the top of the visible half
+      // Draw arc from 180° (left) to 0° (right) - bottom semicircle
+      
+      // Draw scale markings only in the bottom half (180° to 360°)
+      // Map to tachometer range: left=0, bottom=50, right=100
+      for (int i = 0; i <= 10; i++) {
+        // Map to 180° range (from 180° to 360° / 0°)
+        float angle = 180 + (i * 18);  // 180° / 10 = 18° per segment
+        float angleRad = angle * PI / 180.0;
+        
+        // Outer point
+        int x1 = centerX + (radius - 5) * cos(angleRad);
+        int y1 = centerY + (radius - 5) * sin(angleRad);
+        
+        // Inner point (longer for major marks)
+        int markLength = (i % 2 == 0) ? 8 : 5;
+        int x2 = centerX + (radius - 5 - markLength) * cos(angleRad);
+        int y2 = centerY + (radius - 5 - markLength) * sin(angleRad);
+        
+        // Draw marking
+        sprite->drawLine(x1, y1, x2, y2, tachometerScaleColor);
+        if (i % 2 == 0) {
+          sprite->drawLine(x1 + 1, y1, x2 + 1, y2, tachometerScaleColor);
+        }
+      }
+      
+      // Draw needle - map speed 0-100 to angle 180-360°
+      float angle = 180 + (tachometerSpeed * 1.8);  // Map 0-100 to 180°
+      float angleRad = angle * PI / 180.0;
+      int needleLength = radius - 15;
+      int needleX = centerX + needleLength * cos(angleRad);
+      int needleY = centerY + needleLength * sin(angleRad);
+      
+      // Draw thick needle
+      sprite->drawLine(centerX, centerY, needleX, needleY, tachometerNeedleColor);
+      sprite->drawLine(centerX + 1, centerY, needleX + 1, needleY, tachometerNeedleColor);
+      sprite->drawLine(centerX, centerY + 1, needleX, needleY + 1, tachometerNeedleColor);
+      
+      // Draw center hub
+      sprite->fillCircle(centerX, centerY, 3, tachometerNeedleColor);
+      sprite->fillCircle(centerX, centerY, 2, bgColor);
     }
 
 }; // end class TFT_RoboEyes
