@@ -10,6 +10,7 @@
  * - Idle mode (random eye movement)
  * - Button-controlled mood changes (DEFAULT, HAPPY, ANGRY, TIRED)
  * - Color customization
+ * - Mouth animation matching each mood
  * 
  * Hardware:
  * - ESP32-C6 with TFT display (or compatible)
@@ -44,6 +45,9 @@ void setup() {
   // Enable animations
   roboEyes.setAutoblinker(true, 2, 1);  // Auto-blink every 2±1 seconds
   roboEyes.setIdleMode(true, 4, 0);     // Move eyes randomly every 4 seconds
+  
+  // Enable mouth (optional - can be toggled on/off)
+  roboEyes.setMouth(true);
   
   // Setup button for mode switching
   pinMode(9, INPUT_PULLUP);  // BOOT button for mode switching

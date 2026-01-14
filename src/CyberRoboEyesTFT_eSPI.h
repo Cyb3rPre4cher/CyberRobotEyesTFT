@@ -1,5 +1,5 @@
 /*
- * TFT_RoboEyes for TFT Displays V1.3 (Double-Buffered)
+ * TFT_RoboEyes for TFT Displays V1.4 (Double-Buffered)
  * Adapted to work with the Waveshare ESP32-C6-LCD-1.47 using TFT_eSPI.
  * Supports portrait (172x320) and landscape modes, two-eye or cyclops mode,
  * color customization, and expressive animations (auto-blink, idle,
@@ -146,6 +146,14 @@ class TFT_RoboEyes {
     float sweat3Height;
     float sweat3Width;
 
+    // Mouth animation
+    bool mouth;                  // enable/disable mouth
+    int mouthY;                  // Y position of mouth (calculated based on eyes)
+    int mouthX;                  // X position of mouth (calculated based on eyes)
+    int mouthWidth;              // width of mouth
+    int mouthHeight;             // height of mouth
+    int mouthCurvature;          // curvature for happy/sad mouth
+
     // --- New Blink State for AutoBlinker ---
     bool blinkingActive;             // indicates if a blink is in progress (closed state)
     unsigned long blinkCloseDurationTimer; // timer for how long to stay closed
@@ -241,6 +249,14 @@ class TFT_RoboEyes {
       sweat1XPosInitial = 2; sweat1YPos = 2; sweat1YPosMax = 0; sweat1Height = 4; sweat1Width = 3;
       sweat2XPosInitial = 2; sweat2YPos = 2; sweat2YPosMax = 0; sweat2Height = 4; sweat2Width = 3;
       sweat3XPosInitial = 2; sweat3YPos = 2; sweat3YPosMax = 0; sweat3Height = 4; sweat3Width = 3;
+
+      // Mouth defaults
+      mouth = false;
+      mouthWidth = 40;
+      mouthHeight = 8;
+      mouthCurvature = 0;
+      mouthY = 0;
+      mouthX = 0;
 
       // New auto-blink state
       blinkingActive = false;
@@ -426,6 +442,11 @@ class TFT_RoboEyes {
     // Enable or disable sweat animation
     void setSweat(bool sweatBit) {
       sweat = sweatBit;
+    }
+
+    // Enable or disable mouth
+    void setMouth(bool mouthBit) {
+      mouth = mouthBit;
     }
 
     // Set custom colors for drawing
@@ -713,7 +734,68 @@ class TFT_RoboEyes {
         sweat3XPos = sweat3XPosInitial - (sweat3Width / 2);
         sprite->fillRoundRect(sweat3XPos, sweat3YPos, sweat3Width, sweat3Height, sweatBorderradius, mainColor);
       }
+
+      // Draw mouth if enabled
+      if (mouth) {
+        drawMouth();
+      }
     } // end drawEyes
+
+    // ---------------------------
+    // Draw mouth based on current mood
+    void drawMouth() {
+      // Calculate mouth position: centered below the eyes
+      // Use Next positions to follow eye movement without jumping on blink
+      if (cyclops) {
+        // For cyclops mode, center under the single eye
+        mouthX = eyeLxNext + (eyeLwidthDefault / 2) - (mouthWidth / 2);
+        mouthY = eyeLyNext + eyeLheightDefault + 15;
+      } else {
+        // For two eyes, center between them
+        int centerX = eyeLxNext + eyeLwidthDefault + (spaceBetweenDefault / 2);
+        mouthX = centerX - (mouthWidth / 2);
+        // Position below the eyes (use Next Y position + default height)
+        int lowerEyeBottom = eyeLyNext + eyeLheightDefault;
+        int rightEyeBottom = eyeRyNext + eyeLheightDefault;
+        mouthY = max(lowerEyeBottom, rightEyeBottom) + 15;
+      }
+
+      // Draw different mouth shapes based on mood
+      if (happy) {
+        // Happy: smiling arc (curve upward = positive yOffset)
+        // Draw a curved line using filled circle segments
+        for (int i = 0; i < mouthWidth; i++) {
+          float progress = (float)i / mouthWidth;
+          // Parabolic curve for smile
+          int yOffset = (int)(12 * progress * (1 - progress));
+          sprite->fillCircle(mouthX + i, mouthY + yOffset, 1, mainColor);
+        }
+        // Thicker line for better visibility
+        for (int i = 0; i < mouthWidth; i++) {
+          float progress = (float)i / mouthWidth;
+          int yOffset = (int)(12 * progress * (1 - progress));
+          sprite->fillCircle(mouthX + i, mouthY + yOffset + 1, 1, mainColor);
+        }
+      } else if (angry) {
+        // Angry: frowning arc (curve downward = negative yOffset)
+        for (int i = 0; i < mouthWidth; i++) {
+          float progress = (float)i / mouthWidth;
+          int yOffset = (int)(12 * progress * (1 - progress));
+          sprite->fillCircle(mouthX + i, mouthY - yOffset, 1, mainColor);
+        }
+        for (int i = 0; i < mouthWidth; i++) {
+          float progress = (float)i / mouthWidth;
+          int yOffset = (int)(12 * progress * (1 - progress));
+          sprite->fillCircle(mouthX + i, mouthY - yOffset + 1, 1, mainColor);
+        }
+      } else if (tired) {
+        // Tired: small open mouth (oval)
+        sprite->fillRoundRect(mouthX + 10, mouthY, mouthWidth - 20, mouthHeight + 4, 3, mainColor);
+      } else {
+        // Default: straight line
+        sprite->fillRoundRect(mouthX, mouthY, mouthWidth, 3, 1, mainColor);
+      }
+    }
 
 }; // end class TFT_RoboEyes
 

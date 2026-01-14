@@ -5,7 +5,8 @@ Animated robot eyes library for TFT displays using TFT_eSPI.
 ## Features
 
 - 🤖 **Expressive Animations**: Multiple eye moods (Default, Happy, Angry, Tired)
-- 👁️ **Flexible Display Modes**: Two-eye or cyclops mode
+- � **Animated Mouth**: Mood-matching mouth expressions (smile, frown, neutral, open)
+- �👁️ **Flexible Display Modes**: Two-eye or cyclops mode
 - 🎨 **Customizable Appearance**: Colors, sizes, border radius, and spacing
 - ⚡ **Smooth Animation**: Double-buffered rendering for flicker-free display
 - 🔄 **Auto-Blink**: Automatic eye blinking with configurable intervals
@@ -63,6 +64,9 @@ void setup() {
   // Enable animations
   roboEyes.setAutoblinker(true, 2, 1);
   roboEyes.setIdleMode(true, 4, 0);
+  
+  // Enable mouth (optional)
+  roboEyes.setMouth(true);
 }
 
 void loop() {
@@ -155,6 +159,17 @@ Enable/disable single-eye (cyclops) mode.
 
 #### `setSweat(bool sweatBit)`
 Enable/disable sweat drop animation.
+
+#### `setMouth(bool mouthBit)`
+Enable/disable animated mouth that matches the current mood.
+- `true`: Show mouth with mood-specific expressions
+- `false`: Hide mouth
+
+Mouth expressions:
+- **DEFAULT**: Straight line (neutral)
+- **HAPPY**: Downward curve (smile)
+- **ANGRY**: Upward curve (frown)
+- **TIRED**: Small oval (open/yawning)
 
 #### `anim_confused()`
 Trigger confused animation.
